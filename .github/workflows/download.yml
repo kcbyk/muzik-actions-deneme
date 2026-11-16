@@ -38,17 +38,14 @@ jobs:
           key: yt-dlp-venv-ubuntu24-python312-${{ runner.arch }}-${{ hashFiles('requirements.txt') }}
       - name: Python bağımlılığını hazırla
         run: |
-          if [ "${{ steps.deps-cache.outputs.cache-hit }}" != 'true' ] || ! .venv/bin/python -m yt_dlp --version; then
+          if [ "${{ steps.deps-cache.outputs.cache-hit }}" != 'true' ] || ! .venv/bin/python -c 'import yt_dlp, imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())'; then
             python -m venv .venv
             .venv/bin/python -m pip install --disable-pip-version-check -r requirements.txt
           fi
       - name: FFmpeg kontrolü
         run: |
-          if ! command -v ffmpeg >/dev/null 2>&1; then
-            sudo apt-get update -qq
-            sudo apt-get install -y ffmpeg
-          fi
-          ffmpeg -version | head -n 1
+          FFMPEG="$(.venv/bin/python -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')"
+          "$FFMPEG" -version | head -n 1
       - name: İndir ve dönüştür
         env:
           SEARCH_QUERY: ${{ inputs.query }}
