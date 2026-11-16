@@ -44,6 +44,13 @@ def main():
     _, source = validated_input()
     out = Path('output')
     out.mkdir(exist_ok=True)
+    if os.environ.get('TEST_MODE', '').lower() == 'true':
+        # İzin gerektiren bir üçüncü taraf kaynağına erişmeden hattı doğrula.
+        run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi',
+             '-i', 'sine=frequency=440:duration=3', '-c:a', 'libmp3lame',
+             '-b:a', '128k', str(out / 'track.mp3')], timeout=30)
+        print('YouTube yerine üretilmiş test tonu kullanıldı.')
+        return
     # Ayrı argümanlar kullanılır; sorgu shell komutu olarak çalıştırılmaz.
     # Bilinmeyen süreli veya 10 dakikadan uzun videolar reddedilir.
     run([

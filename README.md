@@ -14,3 +14,6 @@
 - GitHub Actions, API, depolama, bant genişliği ve Releases kullanım sınırları vardır. Bu tasarım büyük ölçekli depolama, yayın servisi veya ücretsiz-sınırsız hosting olarak uygun değildir; GitHub politikaları ve hak sahiplerinin şartları geçerlidir.
 - Kod 10 dakikalık süre ve 80 MiB kaynak boyutu üst sınırı uygular. Hatalarda Actions loglarına bak. Eski release'leri ve etiketlerini el ile sil; otomatik temizleme bu demoda yok.
 - `yt-dlp` sürüm değişiklikleri, YouTube bot kontrolleri veya kısıtları nedeniyle başarısız olabilir. DRM, kimlik doğrulama veya platform kısıtlarını aşmaya yönelik özellik eklenmemiştir.
+
+## Otomatik test tonu
+Actions sekmesinden workflow çalıştırılırken `test_mode` etkinleştirilirse YouTube'a erişilmeden 3 saniyelik üretilmiş bir ton MP3 olarak release'e yüklenir. UUID v4 ve boş olmayan bir query yine gereklidir. Bu test YouTube indirmesinin çalıştığını göstermez.
