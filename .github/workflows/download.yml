@@ -22,24 +22,39 @@ permissions:
 
 jobs:
   prepare:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Bağımlılıkları yükle
+      # Yalnız bağımlılıklar önbelleklenir; token, çerez veya ses dosyası girmez.
+      - name: Python ortamını önbellekten geri yükle
+        id: deps-cache
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: yt-dlp-venv-ubuntu24-python312-${{ runner.arch }}-${{ hashFiles('requirements.txt') }}
+      - name: Python bağımlılığını hazırla
         run: |
-          python -m pip install 'yt-dlp>=2025.1.1,<2027'
-          sudo apt-get update -qq
-          sudo apt-get install -y ffmpeg
+          if [ "${{ steps.deps-cache.outputs.cache-hit }}" != 'true' ] || ! .venv/bin/python -m yt_dlp --version; then
+            python -m venv .venv
+            .venv/bin/python -m pip install --disable-pip-version-check -r requirements.txt
+          fi
+      - name: FFmpeg kontrolü
+        run: |
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y ffmpeg
+          fi
+          ffmpeg -version | head -n 1
       - name: İndir ve dönüştür
         env:
           SEARCH_QUERY: ${{ inputs.query }}
           REQUEST_ID: ${{ inputs.request_id }}
           TEST_MODE: ${{ inputs.test_mode }}
-        run: python main.py
+        run: .venv/bin/python main.py
       - name: Release oluştur ve sesi yükle
         env:
           GH_TOKEN: ${{ github.token }}
