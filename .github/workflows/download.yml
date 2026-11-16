@@ -1,0 +1,46 @@
+name: Ses dosyası hazırla
+
+on:
+  workflow_dispatch:
+    inputs:
+      request_id:
+        description: 'İstek kimliği (UUID)'
+        required: true
+        type: string
+      query:
+        description: 'Arama terimi veya YouTube bağlantısı (yalnızca izinli içerik)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Bağımlılıkları yükle
+        run: |
+          python -m pip install 'yt-dlp>=2025.1.1,<2027'
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+      - name: İndir ve dönüştür
+        env:
+          SEARCH_QUERY: ${{ inputs.query }}
+          REQUEST_ID: ${{ inputs.request_id }}
+        run: python main.py
+      - name: Release oluştur ve sesi yükle
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUEST_ID: ${{ inputs.request_id }}
+        run: |
+          set -euo pipefail
+          # Python bu değeri önceden UUID biçiminde doğrular.
+          gh release create "request-${REQUEST_ID}" output/track.mp3 \
+            --title "Ses isteği ${REQUEST_ID}" \
+            --notes "Otomatik oluşturulmuş deneme dosyası."
