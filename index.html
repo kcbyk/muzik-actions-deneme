@@ -15,7 +15,7 @@
   <form id="form">
     <label>Depo sahibi<input id="owner" required placeholder="kullanici"></label>
     <label>Depo adı<input id="repo" required placeholder="muzik-deneme"></label>
-    <label>GitHub token<input id="token" type="password" autocomplete="off" required></label>
+    <label>GitHub token (yalnız yeni indirmeler için)<input id="token" type="password" autocomplete="off"></label>
     <small>Token yalnızca bu tarayıcı sekmesinde tutulur ve GitHub API'sine gönderilir. Kendi depon için, Actions yazma iznine sahip ve süresi kısa bir fine-grained token kullan. Bu model herkese açık bir uygulamanın gizli anahtarını korumaz.</small>
     <label>Şarkı araması veya YouTube bağlantısı<input id="query" maxlength="180" required></label>
     <button id="start">Hazırla</button>
@@ -26,6 +26,22 @@
   <script>
   const $ = (id) => document.getElementById(id);
   const pause = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+  async function songTag(query) {
+    const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(query));
+    return 'song-' + Array.from(new Uint8Array(bytes), b => b.toString(16).padStart(2, '0')).join('');
+  }
+  async function findAudio(base, tag, headers) {
+    const response = await fetch(`${base}/releases/tags/${encodeURIComponent(tag)}`, {headers});
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error(`GitHub sorgusu başarısız: HTTP ${response.status}`);
+    const release = await response.json();
+    const asset = release.assets?.find(x => x.name === 'track.mp3' && x.state === 'uploaded' && x.size > 0);
+    return !release.draft && asset?.browser_download_url ? asset.browser_download_url : null;
+  }
+  function useAudio(url, status) {
+    $('player').src = url; $('link').href = url; $('link').hidden = false;
+    $('status').textContent = status;
+  }
   $('form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const owner = $('owner').value.trim(), repo = $('repo').value.trim();
@@ -33,33 +49,32 @@
     if (!/^[A-Za-z0-9-]{1,39}$/.test(owner) || !/^[A-Za-z0-9_.-]{1,100}$/.test(repo)) {
       $('status').textContent = 'Geçersiz depo sahibi veya adı.'; return;
     }
+    if (!query) { $('status').textContent = 'Arama terimini gir.'; return; }
     const base = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
-    const headers = { 'Accept': 'application/vnd.github+json', 'Authorization': `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28' };
-    const requestId = crypto.randomUUID();
+    const headers = { 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
+    if (token) headers.Authorization = `Bearer ${token}`;
     $('start').disabled = true; $('link').hidden = true; $('player').removeAttribute('src');
     try {
-      $('status').textContent = 'GitHub Actions başlatılıyor...';
+      const tag = await songTag(query);
+      $('status').textContent = 'Kaydedilmiş ses aranıyor...';
+      const cached = await findAudio(base, tag, headers);
+      if (cached) {
+        useAudio(cached, 'Kayıtlı ses bulundu. Oynat tuşuna bas.');
+        return;
+      }
+      if (!token) throw new Error('Bu ses henüz kayıtlı değil. Yeni indirme için kendi deponun Actions yazma iznine sahip tokenı gerekiyor.');
+      $('status').textContent = 'Kayıt bulunamadı, GitHub Actions başlatılıyor...';
       const dispatch = await fetch(`${base}/actions/workflows/download.yml/dispatches`, {
         method: 'POST', headers: {...headers, 'Content-Type': 'application/json'},
-        body: JSON.stringify({ ref: 'main', inputs: { request_id: requestId, query } })
+        body: JSON.stringify({ ref: 'main', inputs: { request_id: crypto.randomUUID(), query, test_mode: 'false' } })
       });
-      if (!dispatch.ok) throw new Error(`Tetiklenemedi: HTTP ${dispatch.status}. Token izinlerini, depo adını ve varsayılan dalı kontrol et.`);
+      if (!dispatch.ok) throw new Error(`Tetiklenemedi: HTTP ${dispatch.status}. Token izinlerini ve depo adını kontrol et.`);
       $('status').textContent = 'Sırada veya işleniyor; birkaç dakika sürebilir...';
       const deadline = Date.now() + 5 * 60 * 1000;
       while (Date.now() < deadline) {
         await pause(5000);
-        const response = await fetch(`${base}/releases/tags/request-${encodeURIComponent(requestId)}`, {headers});
-        if (response.status === 404) continue;
-        if (!response.ok) throw new Error(`Release sorgusu başarısız: HTTP ${response.status}`);
-        const release = await response.json();
-        const asset = release.assets?.find(x => x.name === 'track.mp3');
-        if (!asset?.browser_download_url) continue;
-        // Public repolardaki public release varlıkları doğrudan <audio> ile çalınabilir.
-        $('player').src = asset.browser_download_url;
-        $('link').href = asset.browser_download_url;
-        $('link').hidden = false;
-        $('status').textContent = 'Dosya hazır. Oynat tuşuna bas.';
-        return;
+        const audio = await findAudio(base, tag, headers);
+        if (audio) { useAudio(audio, 'Dosya hazır ve sonraki kullanımlar için kaydedildi. Oynat tuşuna bas.'); return; }
       }
       throw new Error('5 dakika içinde dosya bulunamadı. GitHub Actions günlüklerini kontrol et.');
     } catch (error) {

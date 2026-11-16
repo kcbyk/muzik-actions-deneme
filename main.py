@@ -3,39 +3,12 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-import uuid
-from urllib.parse import urlparse
 
 import imageio_ffmpeg
+from cache_key import request_details
 
-MAX_QUERY = 180
 MAX_BYTES = 80 * 1024 * 1024
 MAX_SECONDS = 600
-
-
-def validated_input():
-    raw_id = os.environ.get('REQUEST_ID', '')
-    try:
-        request_id = str(uuid.UUID(raw_id, version=4))
-    except (ValueError, AttributeError):
-        raise ValueError('REQUEST_ID geçerli bir UUID v4 olmalı')
-    if request_id != raw_id.lower():
-        raise ValueError('REQUEST_ID kanonik UUID v4 biçiminde olmalı')
-    query = os.environ.get('SEARCH_QUERY', '').strip()
-    if not query or len(query) > MAX_QUERY or any(ord(ch) < 32 for ch in query):
-        raise ValueError('Arama terimi boş, çok uzun veya geçersiz')
-    if '://' in query:
-        u = urlparse(query)
-        allowed = {'youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtu.be'}
-        if u.scheme != 'https' or u.hostname not in allowed or u.username or u.password or u.port not in (None, 443):
-            raise ValueError('Yalnızca HTTPS YouTube bağlantıları kabul edilir')
-        if u.hostname == 'youtu.be' and not u.path.strip('/'):
-            raise ValueError('Video kimliği eksik')
-        source = query
-    else:
-        # Arama ilk sonucu seçer; bunun doğru veya izinli içerik olduğunu garanti etmez.
-        source = 'ytsearch1:' + query
-    return request_id, source
 
 
 def run(args, timeout):
@@ -43,7 +16,7 @@ def run(args, timeout):
 
 
 def main():
-    _, source = validated_input()
+    _, source, _ = request_details()
     out = Path('output')
     out.mkdir(exist_ok=True)
     ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()

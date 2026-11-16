@@ -1,5 +1,4 @@
 name: Ses dosyası hazırla
-
 on:
   workflow_dispatch:
     inputs:
@@ -16,10 +15,8 @@ on:
         description: 'Arama terimi veya YouTube bağlantısı (yalnızca izinli içerik)'
         required: true
         type: string
-
 permissions:
   contents: write
-
 jobs:
   prepare:
     runs-on: ubuntu-24.04
@@ -29,36 +26,58 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      # Yalnız bağımlılıklar önbelleklenir; token, çerez veya ses dosyası girmez.
+      - name: İsteği doğrula ve önbellek anahtarını oluştur
+        id: key
+        env:
+          SEARCH_QUERY: ${{ inputs.query }}
+          REQUEST_ID: ${{ inputs.request_id }}
+          TEST_MODE: ${{ inputs.test_mode }}
+        run: python cache_key.py
+      - name: Kayıtlı ses var mı kontrol et
+        id: audio-cache
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CACHE_TAG: ${{ steps.key.outputs.tag }}
+        run: python release_cache.py --outputs
       - name: Python ortamını önbellekten geri yükle
+        if: steps.audio-cache.outputs.ready != 'true'
         id: deps-cache
         uses: actions/cache@v4
         with:
           path: .venv
           key: yt-dlp-venv-ubuntu24-python312-${{ runner.arch }}-${{ hashFiles('requirements.txt') }}
       - name: Python bağımlılığını hazırla
+        if: steps.audio-cache.outputs.ready != 'true'
         run: |
           if [ "${{ steps.deps-cache.outputs.cache-hit }}" != 'true' ] || ! .venv/bin/python -c 'import yt_dlp, imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())'; then
             python -m venv .venv
             .venv/bin/python -m pip install --disable-pip-version-check -r requirements.txt
           fi
-      - name: FFmpeg kontrolü
-        run: |
-          FFMPEG="$(.venv/bin/python -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')"
-          "$FFMPEG" -version | head -n 1
       - name: İndir ve dönüştür
+        if: steps.audio-cache.outputs.ready != 'true'
         env:
           SEARCH_QUERY: ${{ inputs.query }}
           REQUEST_ID: ${{ inputs.request_id }}
           TEST_MODE: ${{ inputs.test_mode }}
         run: .venv/bin/python main.py
       - name: Release oluştur ve sesi yükle
+        if: steps.audio-cache.outputs.ready != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          REQUEST_ID: ${{ inputs.request_id }}
+          CACHE_TAG: ${{ steps.key.outputs.tag }}
         run: |
           set -euo pipefail
-          # Python bu değeri önceden UUID biçiminde doğrular.
-          gh release create "request-${REQUEST_ID}" output/track.mp3 \
-            --title "Ses isteği ${REQUEST_ID}" \
-            --notes "Otomatik oluşturulmuş deneme dosyası."
+          if gh release create "$CACHE_TAG" output/track.mp3 --title "Hazırlanmış ses" --notes "İstek önbelleği"; then
+            echo "Dosya yüklendi."
+          else
+            # Eş zamanlı istekler aynı şarkıyı hazırlamış olabilir. Sadece
+            # gerçekten yayınlanmış ve yüklenmiş dosya varsa başarılı say.
+            for attempt in 1 2 3 4 5; do
+              if python release_cache.py; then
+                echo "Dosya eş zamanlı başka işlem tarafından yüklendi."
+                exit 0
+              fi
+              sleep 2
+            done
+            exit 1
+          fi
